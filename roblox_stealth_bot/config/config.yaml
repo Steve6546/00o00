@@ -1,0 +1,147 @@
+# Roblox Automation System - Configuration
+# ==========================================
+# This file controls all system behavior.
+# Modify values here to customize the bot.
+
+# System Settings
+system:
+  headless: false              # true = invisible browser, false = visible
+  max_concurrent: 1            # Number of parallel tasks (keep at 1 for safety)
+  log_level: INFO              # DEBUG, INFO, WARNING, ERROR
+  log_dir: logs                # Directory for log files
+
+# Rate Limits (to avoid detection)
+rate_limits:
+  accounts_per_hour: 5
+  accounts_per_day: 20
+  follows_per_hour: 20
+  follows_per_day: 100
+  min_delay_between_accounts: 30  # seconds
+  min_delay_between_follows: 15   # seconds
+
+# Delays (randomized between min and max)
+delays:
+  between_accounts_min: 30
+  between_accounts_max: 90
+  between_follows_min: 15
+  between_follows_max: 45
+  typing_delay_min: 0.05
+  typing_delay_max: 0.15
+  page_load_wait: 3            # seconds to wait after page load
+  form_submit_wait: 5          # seconds to wait after form submit
+
+# CAPTCHA Configuration
+captcha:
+  service: none                # none, 2captcha, capmonster
+  api_key: ""                  # Set via environment variable CAPTCHA_API_KEY
+  max_retries: 3
+  timeout: 120                 # seconds to wait for solution
+  reload_on_fail: true         # Reload page to get new CAPTCHA
+
+# Proxy Configuration
+proxy:
+  enabled: false
+  rotation_strategy: least_used  # random, round_robin, least_used
+  auto_fetch: true               # Automatically fetch free proxies
+  fetch_limit: 100               # Max proxies to fetch
+  validation_timeout: 10         # seconds
+
+# Account Generation
+account:
+  username_strategy: auto        # auto, adjective_noun, name_verb, words, random
+  password_length: 12
+  password_include_special: true
+  min_age: 18                    # Minimum age for generated birthday
+  max_age: 30                    # Maximum age for generated birthday
+
+# Behavior Settings
+behavior:
+  warm_up_enabled: false         # Browse before main action
+  warm_up_intensity: light       # light, medium, heavy
+  human_typing: true             # Simulate human typing (typos, variable speed)
+  mouse_movements: true          # Simulate mouse movements
+  scroll_behavior: true          # Natural scrolling
+
+# Follow Settings
+follow:
+  verify_follow: true            # Verify that follow actually worked
+  skip_if_following: true        # Skip if already following
+  cooldown_after_follow: 15      # Account cooldown in minutes
+
+# Error Handling
+errors:
+  max_retries: 3
+  retry_delay: 5                 # seconds
+  screenshot_on_error: true
+  pause_on_ban: true             # Pause all operations if ban detected
+  pause_duration_hours: 6
+
+# Self-Improving Rules (advanced)
+rules:
+  enabled: true
+  
+  # Increase delay after consecutive failures
+  failure_streak_adjustment:
+    enabled: true
+    threshold: 3                 # Number of consecutive failures
+    delay_multiplier: 2.0
+  
+  # Pause after ban detection
+  ban_detection:
+    enabled: true
+    pause_hours: 6
+  
+  # Adjust based on success rate
+  success_rate_adjustment:
+    enabled: true
+    low_threshold: 0.3           # Below this, increase delays
+    high_threshold: 0.8          # Above this, can decrease delays
+
+# ============================================
+# ADVANCED FEATURES (Phase 2)
+# ============================================
+
+# Scheduled Tasks (APScheduler)
+schedule:
+  enabled: false
+  
+  # Account creation schedule
+  account_creation:
+    enabled: false
+    count: 2                     # Accounts per run
+    interval_hours: 6            # Run every 6 hours
+    # cron_hour: 3               # Or run at 3 AM daily
+  
+  # Follow schedule
+  follow:
+    enabled: false
+    target: ""                   # Target UserID
+    count: 5                     # Accounts to use
+    interval_hours: 1            # Run hourly
+
+# Email Verification (Maddy)
+email:
+  enabled: false
+  imap_server: ""                # mail.yourdomain.com
+  domain: ""                     # yourdomain.com
+  imap_port: 993
+  smtp_port: 587
+  username: ""                   # admin@yourdomain.com
+  password: ""                   # Set via env: EMAIL_PASSWORD
+  use_ssl: true
+
+# Mubeng Proxy Rotation
+mubeng:
+  enabled: false
+  port: 8080                     # Local proxy port
+  rotation_requests: 10          # Rotate every N requests
+  mode: random                   # random, sequent
+  auto_fetch_proxies: true
+  validation_target: "https://www.roblox.com"
+
+# NopeCHA CAPTCHA Solving
+nopecha:
+  enabled: false
+  api_key: ""                    # Set via env: NOPECHA_KEY
+  use_extension: true            # Prefer browser extension
+  extension_path: "extensions/nopecha"
