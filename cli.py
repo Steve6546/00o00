@@ -399,5 +399,15 @@ def accounts_health_check():
     console.print("\n[dim]Health check complete[/dim]")
 
 
+@cli.command()
+def shell():
+    """🖥️ Start interactive shell - نظام الأوامر التفاعلي"""
+    from shell import BotShell
+    
+    console.print("[bold cyan]Starting interactive shell...[/bold cyan]")
+    bot_shell = BotShell()
+    bot_shell.run()
+
+
 if __name__ == '__main__':
     cli(obj={})
