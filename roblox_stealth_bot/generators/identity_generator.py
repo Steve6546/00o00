@@ -19,9 +19,17 @@ import hashlib
 from datetime import datetime, date
 from typing import Optional, List, Dict, Set, Tuple
 from dataclasses import dataclass, field
+from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class GenderType(Enum):
+    """Gender selection for account creation."""
+    MALE = "male"
+    FEMALE = "female"
+    RANDOM = "random"
 
 
 @dataclass
@@ -32,6 +40,7 @@ class Identity:
     password: str
     birthday: Dict[str, str]  # {month, day, year}
     birthday_date: date
+    gender: str = "unknown"  # male, female, or unknown
     
     # Metadata
     pattern_used: str = ""
@@ -76,11 +85,22 @@ class UsernameGenerator:
         "Hunts", "Games", "Codes", "Flies", "Jumps", "Dashes", "Blasts"
     ]
     
-    NAMES = [
+    # Male names
+    MALE_NAMES = [
         "Jake", "Alex", "Max", "Sam", "Leo", "Ryan", "Kyle", "Zack",
-        "Luna", "Nova", "Aria", "Zara", "Maya", "Lily", "Ruby", "Skye",
-        "Finn", "Cole", "Nash", "Jace", "Kai", "Axel", "Rex", "Blaze"
+        "Finn", "Cole", "Nash", "Jace", "Kai", "Axel", "Rex", "Blaze",
+        "Ethan", "Mason", "Lucas", "Noah", "Oliver", "Liam", "James", "Logan"
     ]
+    
+    # Female names
+    FEMALE_NAMES = [
+        "Luna", "Nova", "Aria", "Zara", "Maya", "Lily", "Ruby", "Skye",
+        "Emma", "Sophia", "Olivia", "Ava", "Mia", "Isabella", "Chloe", "Ella",
+        "Emily", "Grace", "Zoey", "Nora", "Layla", "Riley", "Aubrey", "Scarlett"
+    ]
+    
+    # Combined for backward compatibility
+    NAMES = MALE_NAMES + FEMALE_NAMES
     
     def __init__(self, db_manager=None):
         self.db = db_manager
@@ -101,13 +121,19 @@ class UsernameGenerator:
         except Exception as e:
             logger.warning(f"Could not load existing usernames: {e}")
     
-    def generate(self, strategy: str = "auto") -> str:
+    def generate(self, strategy: str = "auto", gender: GenderType = GenderType.RANDOM) -> str:
         """
         Generate a unique username.
         
         Args:
             strategy: "adjective_noun", "name_verb", "words", "random", or "auto"
+            gender: GenderType for name selection
         """
+        # Resolve random gender
+        if gender == GenderType.RANDOM:
+            gender = random.choice([GenderType.MALE, GenderType.FEMALE])
+        
+        self._current_gender = gender  # Store for use in name methods
         if strategy == "auto":
             # Choose least-used strategy
             strategies = ["adjective_noun", "name_verb", "words", "random"]
@@ -142,8 +168,13 @@ class UsernameGenerator:
         return f"{adj}{noun}{nums}"
     
     def _generate_name_verb(self) -> str:
-        """JakeRuns99 style"""
-        name = random.choice(self.NAMES)
+        """JakeRuns99 style - uses gender-specific names"""
+        if hasattr(self, '_current_gender') and self._current_gender == GenderType.MALE:
+            name = random.choice(self.MALE_NAMES)
+        elif hasattr(self, '_current_gender') and self._current_gender == GenderType.FEMALE:
+            name = random.choice(self.FEMALE_NAMES)
+        else:
+            name = random.choice(self.NAMES)
         verb = random.choice(self.VERBS)
         nums = ''.join(random.choices(string.digits, k=random.randint(1, 3)))
         return f"{name}{verb}{nums}"
@@ -371,17 +402,23 @@ class IdentityGenerator:
         
         self.generated_count = 0
     
-    def generate(self, username_strategy: str = "auto") -> Identity:
+    def generate(self, username_strategy: str = "auto", gender: GenderType = GenderType.RANDOM) -> Identity:
         """
         Generate a complete unique identity.
         
         Args:
             username_strategy: Strategy for username generation
+            gender: GenderType for name selection (MALE, FEMALE, or RANDOM)
             
         Returns:
             Identity object with all fields
         """
-        username = self.username_gen.generate(strategy=username_strategy)
+        # Resolve random gender
+        actual_gender = gender
+        if gender == GenderType.RANDOM:
+            actual_gender = random.choice([GenderType.MALE, GenderType.FEMALE])
+        
+        username = self.username_gen.generate(strategy=username_strategy, gender=actual_gender)
         password = self.password_gen.generate()
         birthday, birthday_date = self.birthday_gen.generate()
         
@@ -390,11 +427,12 @@ class IdentityGenerator:
             password=password,
             birthday=birthday,
             birthday_date=birthday_date,
+            gender=actual_gender.value,
             pattern_used=username_strategy
         )
         
         self.generated_count += 1
-        logger.info(f"Generated identity #{self.generated_count}: {username}")
+        logger.info(f"Generated identity #{self.generated_count}: {username} ({actual_gender.value})")
         
         return identity
     

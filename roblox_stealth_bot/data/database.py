@@ -36,6 +36,8 @@ class Account(BaseModel):
     last_used = DateTimeField(null=True)
     cooldown_until = DateTimeField(null=True)
     status = CharField(default="active")  # active, banned, cooldown, suspicious
+    is_banned = BooleanField(default=False)
+    last_health_check = DateTimeField(null=True)
     follow_count = IntegerField(default=0)
     notes = TextField(null=True)
 
@@ -55,6 +57,7 @@ class FollowRecord(BaseModel):
     """Track which accounts have followed which targets."""
     account = ForeignKeyField(Account, backref='follow_records')
     target_id = CharField()  # Target user ID
+    target_username = CharField(null=True)  # Target username for display
     followed_at = DateTimeField(default=datetime.datetime.now)
     verified = BooleanField(default=False)
     

@@ -307,5 +307,97 @@ async def _auto_mode(target: str, account_count: int, follows_per: int, options:
         await commander.shutdown()
 
 
+# =============================================================================
+# ACCOUNTS COMMAND GROUP  
+# =============================================================================
+
+@cli.group()
+def accounts():
+    """📊 Account Management - View and manage created accounts"""
+    pass
+
+
+@accounts.command(name='list')
+def accounts_list():
+    """List all accounts with status and follow counts"""
+    from services.health_checker import get_account_summary
+    
+    summary = get_account_summary(None)
+    
+    console.print(Panel.fit(
+        f"[bold]Total: {summary['total']}[/bold] | "
+        f"[green]Active: {summary['active']}[/green] | "
+        f"[red]Banned: {summary['banned']}[/red] | "
+        f"[blue]♂ Male: {summary['male']}[/blue] | "
+        f"[magenta]♀ Female: {summary['female']}[/magenta]",
+        title="📊 Accounts Summary"
+    ))
+    
+    table = Table(title="All Accounts")
+    table.add_column("Username", style="cyan")
+    table.add_column("Gender")
+    table.add_column("Status")
+    table.add_column("Follows", justify="center")
+    table.add_column("Created", style="dim")
+    
+    for acc in summary['accounts']:
+        status_style = "red" if acc['is_banned'] else "green"
+        gender_icon = "♂" if acc['gender'] == 'male' else ("♀" if acc['gender'] == 'female' else "?")
+        table.add_row(
+            acc['username'],
+            f"{gender_icon} {acc['gender']}",
+            f"[{status_style}]{acc['status']}[/{status_style}]",
+            str(acc['follow_count']),
+            acc['created_at'] or "N/A"
+        )
+    
+    console.print(table)
+
+
+@accounts.command(name='info')
+@click.argument('username')
+def accounts_info(username):
+    """Show detailed info for a specific account"""
+    from services.health_checker import get_account_details
+    
+    details = get_account_details(username)
+    if not details:
+        console.print(f"[red]Account '{username}' not found[/red]")
+        return
+    
+    gender_icon = "♂" if details['gender'] == 'male' else ("♀" if details['gender'] == 'female' else "?")
+    console.print(Panel(
+        f"[bold cyan]{details['username']}[/bold cyan]\n\n"
+        f"Status: {details['status']}\n"
+        f"Gender: {gender_icon} {details['gender']}\n"
+        f"[bold]Following: {details['follow_count']} accounts[/bold]",
+        title="📋 Account Details"
+    ))
+    
+    if details['follows']:
+        table = Table(title=f"Follows ({len(details['follows'])})")
+        table.add_column("Target ID")
+        table.add_column("Username")
+        table.add_column("Verified")
+        for f in details['follows']:
+            table.add_row(f['target_id'], f['target_username'] or "N/A", "✅" if f['verified'] else "❓")
+        console.print(table)
+
+
+@accounts.command(name='health-check')
+def accounts_health_check():
+    """Check health status of all accounts"""
+    from data.database import Account
+    import datetime
+    
+    console.print("[bold]🔍 Running health check...[/bold]\n")
+    for account in Account.select():
+        icon = "✅" if not account.is_banned else "❌"
+        console.print(f"  {icon} {account.username}: {account.status}")
+        account.last_health_check = datetime.datetime.now()
+        account.save()
+    console.print("\n[dim]Health check complete[/dim]")
+
+
 if __name__ == '__main__':
     cli(obj={})
