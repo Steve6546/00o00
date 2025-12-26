@@ -261,3 +261,79 @@ When something fails, check:
 2. **Enable verbose:** `python cli.py -v`
 3. **Run visible:** `python cli.py --no-headless`
 4. **Take screenshot:** Add debug screenshots in code
+
+---
+
+## 9. Interactive Shell Issues
+
+### ❌ "No module named 'readline'"
+
+**What happened:** Windows doesn't have readline by default.
+
+**Solution - Works automatically:**
+The shell handles this automatically with a fallback. If you want full readline support:
+```bash
+pip install pyreadline3
+```
+
+---
+
+### ❌ Shell commands not working
+
+**What happened:** Commands don't respond as expected.
+
+**Solutions:**
+1. **Check context:** Make sure you're in the right context
+   ```
+   bot> accounts       # Enter accounts first
+   bot/accounts> list  # Then list works
+   ```
+
+2. **Use help:**
+   ```
+   bot> help           # Shows available commands
+   bot/accounts> help  # Shows account commands
+   ```
+
+3. **Try aliases:**
+   ```
+   ls = list
+   q = exit
+   b = back
+   h = help
+   ```
+
+---
+
+### ❌ "Database not connected"
+
+**What happened:** Shell can't access the database.
+
+**Solutions:**
+1. **Initialize database:**
+   ```bash
+   python cli.py init
+   ```
+
+2. **Check file exists:**
+   ```bash
+   dir data\bot.db  # Windows
+   ls data/bot.db   # Linux
+   ```
+
+---
+
+### Shell Quick Reference
+
+| Context | Command | Description |
+|---------|---------|-------------|
+| main | `accounts` | Enter accounts menu |
+| main | `system` | Enter system menu |
+| main | `proxies` | Enter proxy menu |
+| any | `help` or `h` | Show commands |
+| any | `back` or `b` | Go back |
+| accounts | `list` or `ls` | List accounts |
+| accounts | `info <name>` | Account details |
+| system | `status` | System health |
+| system | `errors` | Recent errors |
+

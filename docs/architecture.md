@@ -4,11 +4,14 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         CLI Interface                           │
-│                         (cli.py)                                │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
+│                     User Interface Layer                         │
+│   ┌────────────────────┐   ┌────────────────────────────────┐   │
+│   │   CLI Interface    │   │   Interactive Shell (NEW)      │   │
+│   │   (cli.py)         │   │   (shell.py)                   │   │
+│   └──────────┬─────────┘   └──────────────┬─────────────────┘   │
+└──────────────┼────────────────────────────┼─────────────────────┘
+               │                            │
+┌──────────────▼────────────────────────────▼─────────────────────┐
 │                         Commander                                │
 │                    (src/control/commander.py)                   │
 │  • Orchestrates all operations                                  │
@@ -16,19 +19,17 @@
 │  • Handles rate limiting                                        │
 └─────────────────────────────┬───────────────────────────────────┘
                               │
-          ┌───────────────────┴───────────────────┐
-          │                                       │
-┌─────────▼─────────┐               ┌─────────────▼─────────────┐
-│   Account Flow    │               │      Follow Flow          │
-│ (src/flows/       │               │ (src/flows/follow_flow.py)│
-│  account_flow.py) │               │                           │
-└─────────┬─────────┘               └─────────────┬─────────────┘
-          │                                       │
-          │         ┌─────────────────────┐       │
-          └────────▶│   State Machine     │◀──────┘
-                    │ (src/core/          │
-                    │  state_machine.py)  │
-                    └─────────────────────┘
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+┌─────────▼─────────┐ ┌───────▼───────────┐ ┌─────▼───────────────┐
+│   Account Flow    │ │   Follow Flow     │ │   Inspector (NEW)   │
+│ (account_flow.py) │ │ (follow_flow.py)  │ │ (inspector.py)      │
+└─────────┬─────────┘ └────────┬──────────┘ └───────┬─────────────┘
+          │                    │                    │
+          │         ┌──────────┴───────────┐        │
+          └────────►│   State Machine      │◄───────┘
+                    │ (state_machine.py)   │
+                    └──────────────────────┘
 ```
 
 ---
@@ -80,6 +81,43 @@ Page Types:
 |---------|---------|
 | `health_checker.py` | Checks account ban status |
 | `anti_detection.py` | Human-like delays, rate limiting |
+
+### 5. Interactive Shell (`shell.py`) - NEW
+
+Advanced command-line interface with:
+
+```
+bot> accounts           # Enter accounts context
+bot/accounts> list      # List all accounts  
+bot/accounts> info usr  # Account details
+bot/accounts> back      # Return to main
+
+bot> system            # Enter system context
+bot> exit              # Exit shell
+```
+
+**Features:**
+- Nested command contexts
+- Auto-complete (Tab)
+- Command history (↑↓)
+- Aliases (ls, q, h, b...)
+
+### 6. Inspector (`src/control/inspector.py`) - NEW
+
+Comprehensive inspection and health checking:
+
+```python
+Inspector methods:
+├── inspect_account(username)     # Detailed account report
+├── inspect_all_accounts()        # All accounts summary
+├── inspect_proxies()             # Proxy pool status
+└── inspect_system()              # Full system health
+
+Health Assessment:
+├── Score: 0-100 rating
+├── Issues: Detected problems
+└── Recommendations: Suggested fixes
+```
 
 ---
 

@@ -641,6 +641,13 @@ class BotShell:
             description='Show help',
             aliases=['h', '?']
         )
+        
+        ctx.commands['exit'] = Command(
+            name='exit',
+            handler=self._cmd_exit,
+            description='Exit shell',
+            aliases=['quit', 'q']
+        )
     
     def _register_proxies_commands(self):
         """Register proxies context commands."""
@@ -676,6 +683,13 @@ class BotShell:
             name='help',
             handler=self._cmd_help,
             description='Show help'
+        )
+        
+        ctx.commands['exit'] = Command(
+            name='exit',
+            handler=self._cmd_exit,
+            description='Exit shell',
+            aliases=['quit', 'q']
         )
     
     def _register_system_commands(self):
@@ -718,6 +732,13 @@ class BotShell:
             name='help',
             handler=self._cmd_help,
             description='Show help'
+        )
+        
+        ctx.commands['exit'] = Command(
+            name='exit',
+            handler=self._cmd_exit,
+            description='Exit shell',
+            aliases=['quit', 'q']
         )
     
     # =========================================================================

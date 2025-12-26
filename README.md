@@ -8,6 +8,7 @@ A sophisticated Python-based automation platform for Roblox account creation and
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
+- [Interactive Shell](#-interactive-shell)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
 - [Warnings & Limits](#warnings--limits)
@@ -44,6 +45,7 @@ This bot automates two primary tasks:
 | 🎭 **Stealth Mode** | Human-like delays, random actions, fingerprint rotation |
 | 👤 **Identity Generator** | Creates unique usernames, passwords, birthdays with gender support |
 | 📊 **Account Dashboard** | CLI to view all accounts, follow counts, status |
+| 🖥️ **Interactive Shell** | Advanced command shell with nested commands |
 | 🔍 **Health Checker** | Detects banned accounts automatically |
 | ⏱️ **Rate Limiting** | Protects from detection with action limits |
 | 📝 **Checkpoint Logging** | Clear ✔️/❌ status for every step |
@@ -137,6 +139,45 @@ python cli.py status
 
 ---
 
+## 🖥️ Interactive Shell
+
+### Start the Interactive Shell
+```bash
+python cli.py shell
+```
+
+### Shell Commands
+
+The interactive shell provides a powerful command interface with nested contexts:
+
+```
+bot> accounts          # Enter accounts context
+bot/accounts> list     # List all accounts
+bot/accounts> info player001  # Account details
+bot/accounts> health   # Health check
+bot/accounts> back     # Return to main
+
+bot> system           # Enter system context
+bot/system> status    # Full system status
+bot/system> tasks     # Recent tasks
+bot/system> errors    # Recent errors
+
+bot> proxies          # Enter proxy context
+bot/proxies> list     # List proxies
+```
+
+### Shell Features
+
+| Feature | Description |
+|---------|-------------|
+| **Nested Contexts** | Navigate: accounts → list → info → back |
+| **Auto-complete** | Press Tab for suggestions |
+| **Command History** | Use ↑↓ arrows |
+| **Aliases** | `ls`=list, `q`=exit, `h`=help, `b`=back |
+| **Account Inspection** | View follower counts, health status |
+
+---
+
 ## ⚙️ Configuration
 
 Configuration file: `config/config.yaml`
@@ -165,6 +206,7 @@ behavior:
 ```
 00o00/
 ├── cli.py              # Command-line interface
+├── shell.py            # Interactive shell (NEW)
 ├── main.py             # Entry point
 ├── requirements.txt    # Dependencies
 │
@@ -174,7 +216,7 @@ behavior:
 │   ├── services/       # Health checker, anti-detection
 │   ├── generators/     # Identity generation
 │   ├── behavior/       # Human-like behavior
-│   ├── control/        # Commander, session management
+│   ├── control/        # Commander, Inspector, session
 │   ├── modules/        # Additional modules
 │   └── utils/          # Logging utilities
 │
