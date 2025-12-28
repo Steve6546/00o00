@@ -13,7 +13,7 @@ import os
 import json
 from pathlib import Path
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
-from core.stealth_layer import StealthLayer
+from src.core.stealth_layer import StealthLayer
 from fake_useragent import UserAgent
 import logging
 
@@ -268,3 +268,4 @@ def clear_all_sessions():
     for f in SESSIONS_DIR.glob("*_session.json"):
         f.unlink()
     logger.info("All sessions cleared")
+

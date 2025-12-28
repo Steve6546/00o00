@@ -952,49 +952,27 @@ class BotShell:
         from src.ui import set_verbose, FollowOutput
         set_verbose(verbose)
         
+        # Show start message (only in non-verbose mode)
+        if not verbose:
+            FollowOutput.show_start("auto-select", target)
+        else:
+            self.console.print(f"[bold]👥 Following {target} with {count} account(s)...[/bold]")
+        
         async def run():
             import time
             start_time = time.time()
-            result = None
             
             from src.control.commander import Commander
             commander = Commander(headless=True)
-            
             try:
                 await commander.initialize()
-                
-                if not verbose:
-                    # Use Rich Status for clean spinner
-                    from rich.status import Status
-                    
-                    with Status(f"[cyan]Following {target}...[/]", console=self.console) as status:
-                        # Update status with elapsed time periodically
-                        async def update_status():
-                            while True:
-                                elapsed = int(time.time() - start_time)
-                                status.update(f"[cyan]Following {target}... [{elapsed}s][/]")
-                                await asyncio.sleep(1)
-                        
-                        # Run both tasks
-                        import asyncio
-                        status_task = asyncio.create_task(update_status())
-                        
-                        try:
-                            result = await commander.follow_user(target, count, target.isdigit())
-                        finally:
-                            status_task.cancel()
-                            try:
-                                await status_task
-                            except asyncio.CancelledError:
-                                pass
-                else:
-                    self.console.print(f"[bold]👥 Following {target}...[/bold]")
-                    result = await commander.follow_user(target, count, target.isdigit())
+                result = await commander.follow_user(target, count, target.isdigit())
                 
                 duration = time.time() - start_time
                 
-                # Show result panel
-                if count == 1 and result:
+                # Show clean result panel
+                if count == 1:
+                    # Single follow - show detailed result
                     FollowOutput.show_result(
                         success=result.completed > 0,
                         account=getattr(result, 'account_used', 'unknown'),
@@ -1003,7 +981,8 @@ class BotShell:
                         error=getattr(result, 'error', ''),
                         already_following=getattr(result, 'already_following', False)
                     )
-                elif result:
+                else:
+                    # Batch follow - show summary
                     from src.ui import BatchOutput
                     BatchOutput.show_summary(
                         operation="Follow",
@@ -1012,8 +991,6 @@ class BotShell:
                         failed=result.failed,
                         duration=duration
                     )
-            except Exception as e:
-                self.console.print(f"[red]Error: {e}[/red]")
             finally:
                 await commander.shutdown()
         

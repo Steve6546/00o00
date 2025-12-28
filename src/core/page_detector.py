@@ -29,7 +29,8 @@ class PageType(Enum):
     UNKNOWN = "unknown"
     
     # Main pages
-    SIGNUP = "signup"
+    LANDING = "landing"  # Main roblox.com page (not logged in, no form visible)
+    SIGNUP = "signup"    # Actual signup form with fields visible
     LOGIN = "login"
     HOME = "home"
     
@@ -79,15 +80,29 @@ class PageDetector:
     
     # Signal definitions for each page type
     PAGE_SIGNALS: Dict[PageType, List[PageSignal]] = {
+        # LANDING: Main roblox.com page without signup form visible
+        PageType.LANDING: [
+            PageSignal("url", r"^https?://www\.roblox\.com/?$", weight=0.8),
+            PageSignal("text", "Sign Up", weight=0.5),
+            PageSignal("text", "Log In", weight=0.4),
+            # Negative signals - if form elements exist, it's not LANDING
+            PageSignal("selector", "#signup-username", weight=0.9, negative=True),
+            PageSignal("selector", "#MonthDropdown", weight=0.9, negative=True),
+        ],
+        
+        # SIGNUP: Actual signup form with visible form fields
         PageType.SIGNUP: [
-            PageSignal("selector", "#MonthDropdown", weight=0.9),
-            PageSignal("selector", "#signup-username", weight=0.9),
+            # High-weight REQUIRED signals - form must have these elements
+            PageSignal("selector", "#MonthDropdown", weight=1.0),
+            PageSignal("selector", "#signup-username", weight=1.0),
             PageSignal("selector", "#signup-password", weight=0.9),
-            PageSignal("selector", "#signup-button", weight=0.8),
-            PageSignal("url", r"^https?://www\.roblox\.com/?$", weight=0.5),
-            PageSignal("text", "Sign Up", weight=0.4),
-            PageSignal("text", "SIGN UP AND START HAVING FUN", weight=0.6),
-            PageSignal("selector", "#login-button", weight=0.3, negative=True),
+            PageSignal("selector", "#DayDropdown", weight=0.8),
+            PageSignal("selector", "#YearDropdown", weight=0.8),
+            PageSignal("selector", "#signup-button", weight=0.7),
+            # URL is low weight - form can appear on main URL or modal
+            PageSignal("url", r"roblox\.com", weight=0.2),
+            # Negative: login elements mean we're on login not signup
+            PageSignal("selector", "#login-button", weight=0.5, negative=True),
         ],
         
         PageType.LOGIN: [
@@ -164,6 +179,7 @@ class PageDetector:
     
     # Available actions per page type
     PAGE_ACTIONS: Dict[PageType, List[str]] = {
+        PageType.LANDING: ["click_signup_button", "go_to_login", "wait"],
         PageType.SIGNUP: ["fill_birthday", "fill_username", "fill_password", "submit_signup", "go_to_login"],
         PageType.LOGIN: ["fill_username", "fill_password", "submit_login", "go_to_signup"],
         PageType.HOME: ["navigate_profile", "navigate_games", "search", "logout"],

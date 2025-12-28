@@ -9,6 +9,9 @@ This orchestrates the complete follow process:
 
 Key features:
 - State machine driven
+- Smart session validation and self-healing
+- Circuit breaker to prevent repeated failures
+- Detailed metrics tracking
 - Multi-verification (button state, followers list, count comparison)
 - Handles various UI states
 """
@@ -20,16 +23,25 @@ import json
 from typing import Optional, Dict, List
 from dataclasses import dataclass, field
 
-from core.state_machine import (
+from src.core.state_machine import (
     StateMachine, SystemState, Event, StateContext,
     create_follow_state_machine
 )
-from core.page_detector import PageDetector, PageType
-from core.session_manager import SessionManager
-from behavior.human_input import HumanInput
+from src.core.page_detector import PageDetector, PageType
+from src.core.session_manager import SessionManager
+from src.core.session_validator import SessionValidator, SessionStatus
+from src.core.session_renewer import SessionRenewer
+from src.core.fallback_login import FallbackLogin
+from src.core.circuit_breaker import CircuitBreaker
+from src.core.session_metrics import SessionMetrics
+from src.behavior.human_input import HumanInput
 from data.database import DatabaseManager, Account
 
 logger = logging.getLogger(__name__)
+
+# Global instances for cross-flow tracking
+_circuit_breaker = CircuitBreaker(failure_threshold=3, reset_timeout=300)
+_session_metrics = SessionMetrics()
 
 
 @dataclass
@@ -280,6 +292,20 @@ class FollowFlow:
         )
         self.sm.set_context(self.context)
         
+        # Check circuit breaker before proceeding
+        if not _circuit_breaker.can_use(self.account.id):
+            logger.warning(
+                f"Circuit breaker OPEN for {self.account.username} - skipping"
+            )
+            result.error = "Account circuit breaker is open (recent failures)"
+            _session_metrics.record_follow(
+                self.account.id, 
+                success=False, 
+                target=target_user,
+                username=self.account.username
+            )
+            return result
+        
         # Create browser context
         browser_context, self.page = await self.session.create_context()
         self.human_input = HumanInput(self.page)
@@ -305,13 +331,39 @@ class FollowFlow:
                 self.db.increment_follow_count(self.account.id)
                 self.db.set_account_cooldown(self.account.id, minutes=15)
                 
+                # Record success in circuit breaker and metrics
+                _circuit_breaker.record_success(self.account.id)
+                _session_metrics.record_follow(
+                    self.account.id,
+                    success=True,
+                    target=target_user,
+                    username=self.account.username
+                )
+                
                 logger.info(f"✓ Follow successful: {self.account.username} -> {target_user}")
             else:
                 result.error = self.context.last_error or "Follow failed"
+                
+                # Record failure in circuit breaker and metrics
+                _circuit_breaker.record_failure(self.account.id, result.error)
+                _session_metrics.record_follow(
+                    self.account.id,
+                    success=False,
+                    target=target_user,
+                    username=self.account.username
+                )
+                
                 logger.error(f"✗ Follow failed: {result.error}")
         
         except Exception as e:
             result.error = str(e)
+            _circuit_breaker.record_failure(self.account.id, str(e))
+            _session_metrics.record_follow(
+                self.account.id,
+                success=False,
+                target=target_user,
+                username=self.account.username
+            )
             logger.error(f"Follow flow error: {e}")
         
         finally:
@@ -351,59 +403,110 @@ class FollowFlow:
             await self._handle_confirming(page_result, result)
     
     async def _handle_login(self, page_result):
-        """Handle login state."""
+        """
+        Handle login state with smart session management.
         
-        # Try cookie-based login first
-        if self.account.cookie:
-            logger.info("Attempting cookie-based login...")
-            try:
-                cookies = json.loads(self.account.cookie)
-                await self.page.context.add_cookies(cookies)
-                
-                # Navigate to check if logged in
-                await self.page.goto("https://www.roblox.com/home", wait_until='domcontentloaded')
-                await asyncio.sleep(3)
-                
-                # Check if logged in
-                result = await self.page_detector.detect(self.page)
-                if result.page_type == PageType.HOME:
-                    logger.info("Cookie login successful!")
-                    await self.sm.handle_event(Event.LOGIN_SUCCESS)
-                    return
-            except Exception as e:
-                logger.warning(f"Cookie login failed: {e}")
+        Strategy:
+        1. Validate session (cookies + live check)
+        2. If expired, try renewal
+        3. If renewal fails, perform full login
+        4. If everything fails, quarantine and fail gracefully
         
-        # Fall back to credentials login
-        logger.info("Performing credentials login...")
-        await self.page.goto("https://www.roblox.com/login", wait_until='domcontentloaded')
-        await asyncio.sleep(2)
+        Key principle: Never give up on an account without trying all options.
+        """
         
-        try:
-            # Fill login form
-            await self.page.fill("#login-username", self.account.username)
-            await asyncio.sleep(0.5)
-            await self.page.fill("#login-password", self.account.password)
-            await asyncio.sleep(0.5)
-            await self.page.click("#login-button")
+        logger.info(f"[LOGIN] Starting smart login for: {self.account.username}")
+        
+        # Initialize session management components
+        validator = SessionValidator()
+        renewer = SessionRenewer()
+        fallback = FallbackLogin()
+        
+        # Step 1: Validate current session
+        logger.info("[LOGIN] Step 1: Validating session...")
+        validation = await validator.validate(self.account, self.page)
+        
+        logger.info(
+            f"[LOGIN] Validation result: {validation.status.value} - {validation.reason}"
+        )
+        
+        # If session is valid, we're done!
+        if validation.status == SessionStatus.VALID and not validation.needs_login:
+            logger.info("[LOGIN] ✓ Session is VALID - no login needed")
+            await self.sm.handle_event(Event.LOGIN_SUCCESS)
+            return
+        
+        # Step 2: Try renewal if session might be recoverable
+        if validation.status in [SessionStatus.NEEDS_RENEWAL, SessionStatus.EXPIRED]:
+            logger.info("[LOGIN] Step 2: Attempting session renewal...")
             
-            await asyncio.sleep(5)
+            renewal_result = await renewer.renew(self.account, self.page)
             
-            # Check result
-            result = await self.page_detector.detect(self.page)
-            if result.page_type == PageType.HOME:
-                # Save cookies for future
-                await self._save_cookies()
+            logger.info(
+                f"[LOGIN] Renewal result: {renewal_result.status.value} - {renewal_result.reason}"
+            )
+            
+            if renewal_result.success:
+                logger.info("[LOGIN] ✓ Session renewed successfully!")
+                
+                # Update cookies in database if new ones were obtained
+                if renewal_result.new_cookies:
+                    try:
+                        self.account.cookie = renewal_result.new_cookies
+                        self.account.save()
+                        logger.info("[LOGIN] Saved renewed cookies to database")
+                    except Exception as e:
+                        logger.warning(f"Could not save renewed cookies: {e}")
+                
                 await self.sm.handle_event(Event.LOGIN_SUCCESS)
-            elif result.page_type == PageType.CAPTCHA:
-                self.context.last_error = "Login requires CAPTCHA"
-                await self.sm.handle_event(Event.LOGIN_FAILED)
-            else:
-                self.context.last_error = "Login failed - still on login page"
-                await self.sm.handle_event(Event.LOGIN_FAILED)
+                return
         
-        except Exception as e:
-            self.context.last_error = f"Login error: {e}"
+        # Step 3: Fallback to full login
+        logger.info("[LOGIN] Step 3: Attempting full login with credentials...")
+        
+        if not self.account.password:
+            logger.error("[LOGIN] ✗ No password stored - cannot perform full login")
+            self.context.last_error = "No password stored for account"
             await self.sm.handle_event(Event.LOGIN_FAILED)
+            return
+        
+        login_result = await fallback.login(self.account, self.page)
+        
+        logger.info(
+            f"[LOGIN] Login result: {login_result.status.value} - {login_result.reason}"
+        )
+        
+        if login_result.success:
+            logger.info("[LOGIN] ✓ Full login successful!")
+            
+            # Save new cookies
+            if login_result.new_cookies:
+                try:
+                    self.account.cookie = login_result.new_cookies
+                    self.account.save()
+                    logger.info("[LOGIN] Saved new login cookies to database")
+                except Exception as e:
+                    logger.warning(f"Could not save login cookies: {e}")
+            
+            await self.sm.handle_event(Event.LOGIN_SUCCESS)
+            return
+        
+        # Step 4: All attempts failed
+        logger.error(
+            f"[LOGIN] ✗ All login attempts failed for {self.account.username}"
+        )
+        
+        # Record the failure reason for later analysis
+        failure_reason = login_result.reason or "Unknown login failure"
+        
+        if login_result.requires_manual:
+            logger.warning(
+                f"[LOGIN] Account {self.account.username} requires manual review: {failure_reason}"
+            )
+            # Could mark account for review here
+        
+        self.context.last_error = f"Login failed: {failure_reason}"
+        await self.sm.handle_event(Event.LOGIN_FAILED)
     
     async def _handle_searching(self, page_result, result: FollowFlowResult):
         """Handle target search state."""
@@ -849,3 +952,4 @@ async def batch_follow(session_manager: SessionManager, db_manager: DatabaseMana
             await asyncio.sleep(delay_between)
     
     return results
+

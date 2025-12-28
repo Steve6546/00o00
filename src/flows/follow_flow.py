@@ -9,6 +9,9 @@ This orchestrates the complete follow process:
 
 Key features:
 - State machine driven
+- Smart session validation and self-healing
+- Circuit breaker to prevent repeated failures
+- Detailed metrics tracking
 - Multi-verification (button state, followers list, count comparison)
 - Handles various UI states
 """
@@ -26,10 +29,19 @@ from src.core.state_machine import (
 )
 from src.core.page_detector import PageDetector, PageType
 from src.core.session_manager import SessionManager
+from src.core.session_validator import SessionValidator, SessionStatus
+from src.core.session_renewer import SessionRenewer
+from src.core.fallback_login import FallbackLogin
+from src.core.circuit_breaker import CircuitBreaker
+from src.core.session_metrics import SessionMetrics
 from src.behavior.human_input import HumanInput
 from data.database import DatabaseManager, Account
 
 logger = logging.getLogger(__name__)
+
+# Global instances for cross-flow tracking
+_circuit_breaker = CircuitBreaker(failure_threshold=3, reset_timeout=300)
+_session_metrics = SessionMetrics()
 
 
 @dataclass
@@ -280,6 +292,20 @@ class FollowFlow:
         )
         self.sm.set_context(self.context)
         
+        # Check circuit breaker before proceeding
+        if not _circuit_breaker.can_use(self.account.id):
+            logger.warning(
+                f"Circuit breaker OPEN for {self.account.username} - skipping"
+            )
+            result.error = "Account circuit breaker is open (recent failures)"
+            _session_metrics.record_follow(
+                self.account.id, 
+                success=False, 
+                target=target_user,
+                username=self.account.username
+            )
+            return result
+        
         # Create browser context
         browser_context, self.page = await self.session.create_context()
         self.human_input = HumanInput(self.page)
@@ -305,13 +331,39 @@ class FollowFlow:
                 self.db.increment_follow_count(self.account.id)
                 self.db.set_account_cooldown(self.account.id, minutes=15)
                 
+                # Record success in circuit breaker and metrics
+                _circuit_breaker.record_success(self.account.id)
+                _session_metrics.record_follow(
+                    self.account.id,
+                    success=True,
+                    target=target_user,
+                    username=self.account.username
+                )
+                
                 logger.info(f"✓ Follow successful: {self.account.username} -> {target_user}")
             else:
                 result.error = self.context.last_error or "Follow failed"
+                
+                # Record failure in circuit breaker and metrics
+                _circuit_breaker.record_failure(self.account.id, result.error)
+                _session_metrics.record_follow(
+                    self.account.id,
+                    success=False,
+                    target=target_user,
+                    username=self.account.username
+                )
+                
                 logger.error(f"✗ Follow failed: {result.error}")
         
         except Exception as e:
             result.error = str(e)
+            _circuit_breaker.record_failure(self.account.id, str(e))
+            _session_metrics.record_follow(
+                self.account.id,
+                success=False,
+                target=target_user,
+                username=self.account.username
+            )
             logger.error(f"Follow flow error: {e}")
         
         finally:
@@ -351,58 +403,67 @@ class FollowFlow:
             await self._handle_confirming(page_result, result)
     
     async def _handle_login(self, page_result):
-        """Handle login state."""
+        """
+        Handle login state with FAST session management.
         
-        # Try cookie-based login first
+        Strategy (optimized for speed):
+        1. Quick cookie check only (no live validation)
+        2. Apply cookies directly
+        3. Let the actual navigation detect if login is needed
+        
+        This avoids double navigation (home + target page).
+        """
+        
+        logger.info(f"[LOGIN] Fast login for: {self.account.username}")
+        
+        # Quick cookie check - no slow live validation
         if self.account.cookie:
-            logger.info("Attempting cookie-based login...")
             try:
-                cookies = json.loads(self.account.cookie)
-                await self.page.context.add_cookies(cookies)
+                import json
+                cookies = json.loads(self.account.cookie) if isinstance(self.account.cookie, str) else self.account.cookie
                 
-                # Navigate to check if logged in
-                await self.page.goto("https://www.roblox.com/home", wait_until='domcontentloaded')
-                await asyncio.sleep(3)
+                # Check for .ROBLOSECURITY cookie
+                has_auth = any(c.get("name") == ".ROBLOSECURITY" for c in cookies)
                 
-                # Check if logged in
-                result = await self.page_detector.detect(self.page)
-                if result.page_type == PageType.HOME:
-                    logger.info("Cookie login successful!")
+                if has_auth:
+                    # Apply cookies and proceed
+                    await self.page.context.add_cookies(cookies)
+                    logger.info(f"[LOGIN] ✓ Cookies applied ({len(cookies)} cookies)")
                     await self.sm.handle_event(Event.LOGIN_SUCCESS)
                     return
+                else:
+                    logger.warning("[LOGIN] No .ROBLOSECURITY cookie found")
             except Exception as e:
-                logger.warning(f"Cookie login failed: {e}")
+                logger.warning(f"[LOGIN] Cookie error: {e}")
         
-        # Fall back to credentials login
-        logger.info("Performing credentials login...")
-        await self.page.goto("https://www.roblox.com/login", wait_until='domcontentloaded')
-        await asyncio.sleep(2)
+        # No valid cookies - need full login
+        if not self.account.password:
+            logger.error("[LOGIN] ✗ No password - cannot login")
+            self.context.last_error = "No password stored"
+            await self.sm.handle_event(Event.LOGIN_FAILED)
+            return
         
-        try:
-            # Fill login form
-            await self.page.fill("#login-username", self.account.username)
-            await asyncio.sleep(0.5)
-            await self.page.fill("#login-password", self.account.password)
-            await asyncio.sleep(0.5)
-            await self.page.click("#login-button")
+        # Perform full login
+        logger.info("[LOGIN] Performing full login...")
+        fallback = FallbackLogin()
+        login_result = await fallback.login(self.account, self.page)
+        
+        if login_result.success:
+            logger.info("[LOGIN] ✓ Full login successful")
             
-            await asyncio.sleep(5)
+            # Save new cookies
+            if login_result.new_cookies:
+                try:
+                    self.account.cookie = login_result.new_cookies
+                    self.account.save()
+                    logger.info("[LOGIN] Saved new cookies")
+                except Exception as e:
+                    logger.warning(f"Could not save cookies: {e}")
             
-            # Check result
-            result = await self.page_detector.detect(self.page)
-            if result.page_type == PageType.HOME:
-                # Save cookies for future
-                await self._save_cookies()
-                await self.sm.handle_event(Event.LOGIN_SUCCESS)
-            elif result.page_type == PageType.CAPTCHA:
-                self.context.last_error = "Login requires CAPTCHA"
-                await self.sm.handle_event(Event.LOGIN_FAILED)
-            else:
-                self.context.last_error = "Login failed - still on login page"
-                await self.sm.handle_event(Event.LOGIN_FAILED)
-        
-        except Exception as e:
-            self.context.last_error = f"Login error: {e}"
+            await self.sm.handle_event(Event.LOGIN_SUCCESS)
+        else:
+            logger.error(f"[LOGIN] ✗ Login failed: {login_result.reason}")
+            self.context.last_error = login_result.reason
             await self.sm.handle_event(Event.LOGIN_FAILED)
     
     async def _handle_searching(self, page_result, result: FollowFlowResult):
@@ -417,7 +478,7 @@ class FollowFlow:
             logger.info(f"Navigating to profile: {profile_url}")
             
             await self.page.goto(profile_url, wait_until='domcontentloaded')
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)  # Fast
             
             page_check = await self.page_detector.detect(self.page)
             logger.info(f"After navigation, page type: {page_check.page_type.value}")
@@ -434,7 +495,7 @@ class FollowFlow:
                 return
             else:
                 # Try once more
-                await asyncio.sleep(2)
+                await asyncio.sleep(1)  # Fast
                 # Assume we're on profile anyway
                 await self.sm.handle_event(Event.TARGET_FOUND)
                 await self.sm.handle_event(Event.PAGE_LOADED)
@@ -447,7 +508,7 @@ class FollowFlow:
             # Use Roblox search
             search_url = f"https://www.roblox.com/search/users?keyword={target}"
             await self.page.goto(search_url, wait_until='domcontentloaded')
-            await asyncio.sleep(3)
+            await asyncio.sleep(1)  # Fast
             
             # Look for the user in results
             user_link = await self.page.query_selector(f"a[href*='/users/']:has-text('{target}')")
@@ -482,7 +543,7 @@ class FollowFlow:
         
         # Navigate to profile if not there
         await self.page.goto(profile_url, wait_until='domcontentloaded')
-        await asyncio.sleep(2)
+        await asyncio.sleep(1)  # Reduced
         
         # Detect page
         result = await self.page_detector.detect(self.page)
@@ -699,7 +760,7 @@ class FollowFlow:
         logger.info("Trying contextual menu follow...")
         
         # Wait for page to fully load first
-        await asyncio.sleep(3)
+        await asyncio.sleep(1)  # Reduced
         
         # Take debug screenshot
         try:
@@ -723,7 +784,7 @@ class FollowFlow:
                 await menu_loc.first.click(force=True)  # Force click even if covered
                 logger.info("Clicked contextual menu button via locator")
                 menu_opened = True
-                await asyncio.sleep(2)  # Wait for menu dropdown to appear
+                await asyncio.sleep(1)  # Reduced
         except Exception as e:
             logger.warning(f"Locator click failed: {e}")
         
@@ -740,7 +801,7 @@ class FollowFlow:
                         await btn.click(force=True)
                         logger.info(f"Clicked fallback: {selector}")
                         menu_opened = True
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(1)  # Reduced
                         break
                 except:
                     pass
